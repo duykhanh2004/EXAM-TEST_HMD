@@ -1,0 +1,62 @@
+a) Các vấn đề của câu lệnh SQL hiện tại:
+
+Thiếu điều kiện lọc theo nhà sản xuất (HMD):
+Câu lệnh chỉ lọc sản phẩm theo giá (p.price > 10000) mà không kiểm tra nhà sản xuất (ví dụ: p.manufacturer = 'HMD'). Điều này dẫn đến kết quả sai lệch, bao gồm cả các sản phẩm không thuộc HMD.
+
+Thứ tự sắp xếp (ORDER BY) gây tốn hiệu năng:
+Việc sắp xếp kết quả theo o.order_date DESC có thể chậm nếu bảng orders lớn và không có index phù hợp. Đặc biệt, các dòng không có đơn hàng (o.order_date = NULL) sẽ bị xếp lên đầu/cuối tùy database, gây khó kiểm soát thứ tự.
+
+Thiếu index hỗ trợ:
+
+Không có index trên products.manufacturer và products.price → Lọc WHERE chậm.
+
+Không có index trên orders.product_id và orders.order_date → JOIN và ORDER BY chậm.
+
+Index trên customers.id thường đã có (khóa chính), nhưng nếu thiếu index trên orders.customer_id, JOIN với customers sẽ chậm.
+
+Xử lý NULL trong ORDER BY:
+Các sản phẩm không có đơn hàng (o.order_date = NULL) được trả về, nhưng thứ tự của chúng phụ thuộc vào cách database xử lý NULL (không rõ ràng).
+
+b) Đề xuất tối ưu hóa:
+
+Thêm điều kiện lọc cho nhà sản xuất:
+
+sql
+WHERE p.price > 10000 AND p.manufacturer = 'HMD'
+Tạo index để tăng tốc độ truy vấn:
+
+Trên bảng products:
+
+sql
+CREATE INDEX idx_products_manufacturer_price ON products (manufacturer, price);
+→ Tối ưu lọc sản phẩm theo manufacturer và giá.
+
+Trên bảng orders:
+
+sql
+CREATE INDEX idx_orders_product_id_order_date ON orders (product_id, order_date DESC);
+→ Tăng tốc JOIN với products và sắp xếp theo order_date.
+
+sql
+CREATE INDEX idx_orders_customer_id ON orders (customer_id);
+→ Tối ưu JOIN với customers (nếu chưa có sẵn).
+
+Thay đổi logic ORDER BY (nếu được phép):
+
+Nếu ưu tiên sản phẩm có đơn hàng trước, sử dụng:
+
+sql
+ORDER BY o.order_date DESC NULLS LAST
+→ Đẩy các sản phẩm không có đơn hàng xuống cuối (hỗ trợ bởi PostgreSQL, các DB khác cần điều chỉnh).
+
+Kiểm tra execution plan:
+Sử dụng EXPLAIN ANALYZE để xác định điểm nghẽn và điều chỉnh index phù hợp.
+
+Câu lệnh đã tối ưu:
+
+SELECT p.id, p.name, p.price, o.order_date, c.name AS customer_name 
+FROM products p
+LEFT JOIN orders o ON p.id = o.product_id
+LEFT JOIN customers c ON o.customer_id = c.id
+WHERE p.price > 10000 AND p.manufacturer = 'HMD'
+ORDER BY o.order_date DESC NULLS LAST; -- Tùy vào database hỗ trợ
